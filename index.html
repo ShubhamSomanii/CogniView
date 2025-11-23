@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Multi-Answer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <div class="max-w-5xl mx-auto p-6">
+    <h1 class="text-3xl font-bold mb-4">Compare AI Answers</h1>
+    <p class="text-sm text-slate-600 mb-6">
+      Enter a prompt, see responses from AIMLAPI, Gemini, and Hugging Face. Pick the best.
+    </p>
+
+    <!-- Prompt -->
+    <div class="bg-white rounded-2xl shadow p-4 mb-6">
+      <label class="block text-sm font-medium mb-2" for="prompt">Your prompt</label>
+      <textarea
+        id="prompt"
+        class="w-full p-3 border rounded-xl focus:outline-none focus:ring"
+        rows="4"
+        placeholder="Ask anything..."
+      ></textarea>
+      <div class="mt-3 flex items-center gap-3">
+        <button id="runBtn" class="px-4 py-2 rounded-xl bg-blue-600 text-white disabled:opacity-60">Run</button>
+        <span id="status" class="text-sm text-slate-500"></span>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="results" class="grid md:grid-cols-3 gap-4 hidden">
+      <!-- AIMLAPI (uses 'openai' slot) -->
+      <div class="bg-white rounded-2xl shadow p-4 flex flex-col">
+        <div class="flex items-center justify-between mb-2">
+          <!-- THIS LABEL IS CHANGED -->
+          <h2 class="font-semibold">AIMLAPI (Llama 3)</h2>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input type="radio" name="winner" value="openai" /> Best
+          </label>
+        </div>
+        <!-- ID is still 'openaiText' to match the PHP response key -->
+        <pre id="openaiText" class="whitespace-pre-wrap text-sm flex-1">(no answer)</pre>
+      </div>
+
+      <!-- Gemini -->
+      <div class="bg-white rounded-2xl shadow p-4 flex flex-col">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="font-semibold">Gemini (Google)</h2>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input type="radio" name="winner" value="gemini" /> Best
+          </label>
+        </div>
+        <pre id="geminiText" class="whitespace-pre-wrap text-sm flex-1">(no answer)</pre>
+      </div>
+
+      <!-- Hugging Face -->
+      <div class="bg-white rounded-2xl shadow p-4 flex flex-col">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="font-semibold">Hugging Face (Llama 3)</h2>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input type="radio" name="winner" value="huggingface" /> Best
+          </label>
+        </div>
+        <pre id="huggingfaceText" class="whitespace-pre-wrap text-sm flex-1">(no answer)</pre>
+      </div>
+    </div>
+
+    <!-- Vote -->
+    <div id="voteRow" class="hidden mt-4 flex items-center gap-3">
+      <button id="voteBtn" class="px-4 py-2 rounded-xl bg-green-600 text-white disabled:opacity-60">Submit vote</button>
+      <span id="voteStatus" class="text-sm text-slate-500"></span>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = location.origin + '/api';
+    const $ = (id) => document.getElementById(id);
+
+    const runBtn = $('runBtn');
+    const statusEl = $('status');
+    const results = $('results');
+    const voteRow = $('voteRow');
+    const voteBtn = $('voteBtn');
+
+    const openaiText = $('openaiText'); // AIMLAPI
+    const geminiText = $('geminiText');
+    const huggingfaceText = $('huggingfaceText'); 
+
+    function getWinner() {
+      const el = document.querySelector('input[name="winner"]:checked');
+      return el ? el.value : null;
+    }
+
+    runBtn.addEventListener('click', async () => {
+      const prompt = $('prompt').value.trim();
+      if (!prompt) {
+        statusEl.textContent = 'Please enter a prompt.';
+        return;
+      }
+      results.classList.add('hidden');
+      voteRow.classList.add('hidden');
+      openaiText.textContent = '(loading...)';
+      geminiText.textContent = '(loading...)';
+      huggingfaceText.textContent = '(loading...)';
+      statusEl.textContent = 'Running…';
+      runBtn.disabled = true;
+
+      try {
+        const res = await fetch(API_BASE + '/aggregate.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+        });
+
+        const ct = res.headers.get('content-type') || '';
+        const data = ct.includes('application/json') ? await res.json() : { error: await res.text() };
+        console.log('aggregate response:', data);
+        if (!res.ok) throw new Error(data.error || 'Request failed');
+
+        openaiText.textContent = data.answers?.openai?.text || '(no answer)';
+        geminiText.textContent = data.answers?.gemini?.text || '(no answer)';
+        huggingfaceText.textContent = data.answers?.huggingface?.text || '(no answer)';
+
+        results.classList.remove('hidden');
+        voteRow.classList.remove('hidden');
+        statusEl.textContent = '';
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = 'Error: ' + err.message;
+        openaiText.textContent = '(error)';
+        geminiText.textContent = '(error)';
+        huggingfaceText.textContent = '(error)';
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+
+    voteBtn?.addEventListener('click', async () => {
+      const winner = getWinner();
+      if (!winner) {
+        $('voteStatus').textContent = 'Pick the best answer first.';
+        return;
+      }
+      const prompt = $('prompt').value.trim();
+      voteBtn.disabled = true;
+      $('voteStatus').textContent = 'Saving…';
+      try {
+        const res = await fetch(API_BASE + '/vote.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: winner, prompt }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Vote failed');
+        $('voteStatus').textContent = 'Thanks! Your vote was recorded.';
+      } catch (err) {
+        $('voteStatus').textContent = 'Error: '.concat(err.message);
+      } finally {
+        voteBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
